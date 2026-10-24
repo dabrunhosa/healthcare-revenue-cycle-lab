@@ -6,4 +6,7 @@
     <Project Path="src/RevenueCycle.Api/RevenueCycle.Api.csproj" />
     <Project Path="src/RevenueCycle.MockPayer/RevenueCycle.MockPayer.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RevenueCycle.Tests/RevenueCycle.Tests.csproj" />
+  </Folder>
 </Solution>

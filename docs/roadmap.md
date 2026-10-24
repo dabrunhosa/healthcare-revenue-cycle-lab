@@ -11,14 +11,14 @@
 
 ## Phase 1b — First vertical slice
 
-- [ ] Define supported FHIR R4 input and explicit billing schema with synthetic fixtures.
-- [ ] Implement validated patient, encounter, billing, and claim models.
-- [ ] Add durable workflow/history/pending-work storage and guarded transitions.
-- [ ] Produce a declared 837 professional-claim subset and retain its artifact.
-- [ ] Submit to the mock payer with persistent deduplication and correlation.
-- [ ] Implement idempotency, bounded retries/backoff, circuit breaker, and manual recovery.
-- [ ] Add workflow inspection, OpenAPI, and OpenTelemetry with local export.
-- [ ] Verify normal flow, permanent failure, ambiguous timeout, duplicates, and restart recovery.
+- [x] Define supported FHIR R4 input and explicit billing schema with synthetic fixtures.
+- [x] Implement validated patient, encounter, billing, and claim models.
+- [x] Add durable workflow/history/pending-work storage and guarded transitions.
+- [x] Produce a declared 837 professional-claim subset and retain its artifact.
+- [x] Submit to the mock payer with persistent deduplication and correlation.
+- [x] Implement idempotency, bounded retries/backoff, circuit breaker, and manual recovery.
+- [x] Add workflow inspection, OpenAPI, and OpenTelemetry with local export.
+- [x] Verify normal flow, permanent failure, ambiguous timeout, duplicates, and restart recovery.
 
 ## Phase 2 — Clinical adapters and payer responses
 

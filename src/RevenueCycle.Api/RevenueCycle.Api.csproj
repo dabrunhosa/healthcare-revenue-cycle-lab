@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
     <ProjectReference Include="../RevenueCycle.Application/RevenueCycle.Application.csproj" />
     <ProjectReference Include="../RevenueCycle.Infrastructure/RevenueCycle.Infrastructure.csproj" />
   </ItemGroup>

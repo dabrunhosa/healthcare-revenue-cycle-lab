@@ -1,4 +1,4 @@
-name: Build scaffold
+name: Verify revenue cycle
 on:
   push:
   pull_request:
@@ -12,5 +12,6 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - run: dotnet test RevenueCycle.slnx --configuration Release --disable-build-servers -m:1
       - run: pwsh -File scripts/smoke.ps1
       - run: docker compose build

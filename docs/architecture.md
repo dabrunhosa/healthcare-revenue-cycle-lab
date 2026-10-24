@@ -1,58 +1,85 @@
 # Architecture
 
-## Current executable surface
-
-The scaffold contains two independent ASP.NET Core processes exposing `GET /` and `GET /health`. The domain holds an initial workflow-stage enum and correlation record. Infrastructure is an empty assembly reserved for adapters. No workflow, persistence, parsing, claim endpoint, or telemetry exporter is implemented.
-
-## Target Phase 1 design
+## Executable boundaries
 
 ```mermaid
 flowchart TD
-    API[API: ingestion and inspection] --> APP[Application: revenue-cycle orchestration]
-    APP --> DOMAIN[Domain: state transitions and invariants]
-    INFRA[Infrastructure: persistence and adapters] --> APP
+    API[API: ingestion / inspection / recovery] --> APP[Application: workflow service and processor]
+    APP --> DOMAIN[Domain: immutable snapshots and transitions]
+    INFRA[Infrastructure adapters] --> APP
     API --> INFRA
-    INFRA --> DB[(SQLite: workflows and pending work)]
-    INFRA --> PAYER[Mock payer HTTP service]
+    INFRA --> DB[(SQLite workflow + pending work)]
+    INFRA --> PAYER[Mock payer HTTP host]
+    PAYER --> RECEIPTS[(Separate SQLite receipts)]
 ```
 
-Arrows inside the application describe source dependencies; arrows to external components describe runtime integration. The API is the composition root. Domain has no framework or persistence dependency. Application will own orchestration and adapter contracts; Infrastructure will implement them. The mock payer is independently deployable and must not reuse internal orchestration logic.
+The API composes the application and infrastructure layers. Application owns contracts and orchestration; Domain depends on no framework. The mock payer shares wire DTOs and telemetry/bootstrap utilities through the current Infrastructure reference, but does not register the workflow worker or access its database. Extracting those shared utilities into a small separate library is an option if the mock grows.
 
-SQLite is the proposed local durable store, with transactional pending-work records and a hosted worker. This keeps the initial demo reproducible without a broker. A broker or production database can later replace an adapter when there is an explicit requirement; the scaffold makes no scale or availability claim.
+## Ingestion transaction
 
-## Workflow and correlation
+The strict input adapter accepts an explicitly synthetic Patient/Encounter resource subset and separately supplied billing. It validates references, finished ambulatory status, date bounds, diagnosis syntax, fictional procedure codes, quantities, and money precision. It does not derive billing from clinical prose.
 
-The intended initial path is `EncounterReceived -> ClinicalContextReady -> ClaimCreated -> SubmissionPending -> Submitted`, with `RetryScheduled` and `ManualReview` recovery paths. These names exist today; guarded transitions and history do not.
+The service creates an immutable clinical/billing snapshot, a stable claim ID, an educational 837 artifact, and four history entries. One SQLite row stores that document together with unique ingestion key, input fingerprint, unique encounter ID, stage, due time, version token, and lease expiry. The insert atomically creates both the workflow and its pending work; there is no separate broker or dual-write window. Initial validation/claim transitions are committed together, not independently observable intermediate jobs.
 
-| Identifier | Meaning and assignment |
+A replay with identical typed input and key returns the existing workflow. Changed input under that key or another key for the same encounter returns 409. Fingerprints cover typed serialization, so JSON whitespace/property order is irrelevant; array order and supplied timestamps remain significant. This phase intentionally supports one claim per encounter.
+
+## Durable execution and concurrency
+
+The hosted worker polls every 250 ms. It acquires a due row with an atomic compare-and-swap version change and a 30-second lease. Saving an attempt before the HTTP call consumes its durable budget. All subsequent updates require the version token; an expired worker cannot overwrite another worker's acquired state.
+
+If the process stops mid-attempt, the lease expires and a new worker marks the unfinished attempt `UnknownAfterRestart`. It reuses the stored claim/artifact and submission key. An exhausted budget enters manual review instead of sending again. The payer inserts its receipt under a unique claim ID and fingerprint before returning; a repeat returns the same receipt across payer restarts. A conflicting body returns 409.
+
+Delivery is at least once. Leases reduce concurrent processing; payer deduplication is the correctness boundary for an accepted request with a missing response. This design is verified against local SQLite, not established as a horizontally scaled deployment guarantee.
+
+## State machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> EncounterReceived
+    EncounterReceived --> ClinicalContextReady
+    ClinicalContextReady --> ClaimCreated
+    ClaimCreated --> SubmissionPending
+    SubmissionPending --> Submitted
+    SubmissionPending --> RetryScheduled
+    SubmissionPending --> ManualReview
+    RetryScheduled --> RetryScheduled
+    RetryScheduled --> Submitted
+    RetryScheduled --> ManualReview
+    ManualReview --> SubmissionPending: explicit recovery
+```
+
+`Submitted` means the mock payer receipt was durably recorded. It does not mean acknowledged by 277CA, adjudicated, paid, or reconciled. Terminal success cannot be manually requeued.
+
+| Identifier | Assignment |
 | --- | --- |
-| WorkflowId | Internal workflow identity |
-| EncounterId | Source clinical encounter identity |
-| ClaimId | Claim identity assigned when a claim is created |
-| PayerClaimId | Mock payer identity assigned on receipt |
-| TraceNumber | Future remittance/payment business trace; nullable until known |
-| PaymentReference | Future bank settlement reference; nullable until known |
+| WorkflowId | Internal ingestion/workflow identity |
+| EncounterId | Validated source encounter identity |
+| ClaimId | Generated once at claim creation; also payer idempotency key |
+| PayerClaimId | Generated by mock payer on first receipt |
+| TraceNumber | Reserved for later remittance/payment business correlation |
+| PaymentReference | Reserved for later bank settlement correlation |
 
-Business trace numbers are distinct from OpenTelemetry trace IDs. The initial record is a vocabulary, not a final reconciliation schema: later phases must represent split payments, batches, adjustments, and many-to-many claim/payment relationships.
+TraceNumber is not an OpenTelemetry trace ID. Later phases must expand the model for batches, partial/split payments, and many-to-many claim/payment matching.
 
-## Clinical and administrative boundaries
+## Resilience policy
 
-FHIR R4 is the first planned ingestion format. Only a documented resource subset will be accepted. HL7 v2 will enter through a separate normalization adapter later. Clinical records are not automatically billable: diagnosis/procedure/billing details must be supplied explicitly and validated.
+- Four attempts per recovery cycle by default. The budget includes circuit-open decisions and interrupted attempts.
+- Transient outcomes: transport failure, timeout, HTTP 408/429/5xx, or open circuit. Permanent responses and invalid receipts enter manual review.
+- Exponential delay starts at two seconds, caps at thirty seconds, and samples jitter between half and all of the calculated delay. Retry-After is not interpreted in this lab.
+- HTTP resilience uses Polly via Microsoft.Extensions.Http.Resilience: three-second request timeout; five-second outer HttpClient limit; circuit opens at 50% transient failures with at least three observations in thirty seconds, then waits ten seconds before probing.
+- The HTTP handler does not retry. Retry decisions and due times live in the durable workflow, avoiding multiplied attempts.
+- Manual recovery accepts `PayerRestored` or `OperatorRetry`, adds a history record, preserves claim identity, and starts a fresh finite cycle. There is no authenticated operator identity in this local lab.
 
-The 837 adapter will emit a declared educational professional-claim subset. Payer HTTP receipt is not a 277CA acknowledgment, adjudication, or payment. Later phases distinguish technical acknowledgment, claim acknowledgment (277CA), claim status (277), remittance (835), and bank settlement.
+## Storage and operational limits
 
-## Reliability requirements for the next increment
+SQLite schema is created with EF Core EnsureCreated on first startup. No schema migration chain is shipped yet; future schema changes must add migration/version handling before reusing existing databases. The JSON document has no independent schema version at this milestone. Database files, logs, and build output are ignored by Git. Compose uses separate named volumes owned by the non-root application user.
 
-- Store workflow changes and pending submission work atomically.
-- Use ingestion keys plus payload fingerprints to detect both duplicates and conflicts.
-- Persist stable payer submission keys and mock-payer deduplication across restarts.
-- Retry transient failures with finite budgets, backoff, jitter, and timeouts. Route permanent or exhausted failures to manual review.
-- Add circuit breaking without treating an open circuit as successful submission.
-- Record recovery requests and guard against simultaneous processing and requeue.
-- Test acceptance followed by a lost HTTP response; do not claim exactly-once delivery.
+List inspection returns at most 100 rows ordered by due time. There is no pagination, retention, archival, authorization, or dead-letter administration UI. Corrupt stored documents and prolonged storage failures are logged by error type and require operator intervention; they are not silently treated as successful claims.
 
-## Observability and execution boundary
+## Telemetry and trust boundary
 
-OpenTelemetry tracing, metrics, structured logs, and local OTLP visualization are planned. Log identifiers and operational metadata, not patient payloads. Avoid identifiers as metric labels. Inspection endpoints will expose persisted history and attempts.
+OpenTelemetry instruments inbound/outbound HTTP, creates `payer.submit` spans with workflow/claim/encounter IDs and outcome, and counts submission outcomes. Background execution starts its own trace; business IDs link it to the persisted workflow rather than persisting inbound trace context. Patient resource bodies, billing lines, and artifacts are not added to telemetry. EF sensitive-data logging is not enabled. Metrics avoid high-cardinality business IDs.
 
-The current hosts have no authentication and are intended for loopback demos. Authentication, authorization, transport security, secret management, migrations, and operational hardening must be designed before any public hosting. Synthetic-only intent is not an implemented real-data detector.
+Console and OTLP exporters are opt-in. Compose directs OTLP to the local Aspire dashboard; container rendering remains unverified without Docker. The API surface provides workflow inspection now; the dashboard is a telemetry viewer, not a dedicated workflow UI.
+
+The API and mock payer have no authentication and are intended for loopback-only synthetic demonstrations. The client accepts only loopback or the Compose mock-payer hostname and disables redirects. Public deployment needs separate security, operations, privacy, migration, and standards validation work.

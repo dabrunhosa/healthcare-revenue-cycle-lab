@@ -1,21 +1,23 @@
 # Demo acceptance criteria
 
-## Available now: scaffold
+## Successful submission
 
-Run `pwsh -File scripts/smoke.ps1` from the repository root. It must build successfully, start both hosts, receive healthy responses, confirm synthetic-only scaffold metadata, and stop its own processes. Workflow processing and payer submission must report unavailable.
+Submit `samples/encounter.json` with a unique idempotency key. Inspect the workflow until Submitted. Verify an educational 837 artifact, ordered history, and linked EncounterId, ClaimId, and PayerClaimId. TraceNumber and PaymentReference remain unset: receipt does not mean payment.
 
-## Next: successful submission
+## Duplicate and conflicting requests
 
-A fictional encounter plus supplied billing context yields one persisted claim artifact and one payer receipt. Inspection shows ordered transitions and matching EncounterId, ClaimId, and PayerClaimId. Payment references remain unset. Submitted means received, not paid.
+Repeat identical ingestion and verify the original workflow is returned. Change a billing value under that key and verify 409. Another key for the same encounter also conflicts. The payer separately rejects changed content for an existing submission key.
 
-## Next: duplicate and ambiguous delivery
+## Bounded failure and recovery
 
-Replay identical ingestion and verify the original workflow is returned. Reuse its key with different content and verify rejection. Simulate payer acceptance followed by a lost response; retry and verify one payer claim, including after a restart.
+Start the payer in Unavailable mode. A new workflow reaches ManualReview after four attempts; history includes transient failures and a circuit-open outcome. Restart payer in Accept mode, allow the circuit break to expire, then recover with PayerRestored. Verify the original claim identity, a new recovery cycle, and eventual Submitted state. Reject mode must enter ManualReview after one attempt.
 
-## Next: bounded failure and recovery
+## Accepted request with lost response and process restart
 
-Simulate transient failures until the retry budget is exhausted. Inspect attempt history and manual-review state. Restore the payer, request recovery, and verify the original submission identity is reused. Permanent validation failures must not consume automatic retries.
+Start payer in AcceptThenTimeout mode. Submit an encounter; once GET /claims exposes its receipt, stop the API before the response completes. Restart both services with their original storage paths. After the thirty-second lease expires, verify UnknownAfterRestart in attempt history, eventual Submitted state, and exactly one persisted payer receipt for that claim. This demonstrates deduplication under at-least-once delivery, not exactly-once transport.
+
+The automated smoke script performs all scenarios against isolated files. It also checks metadata, health, OpenAPI, actual submission traces, and absence of clinical fixture content in logs.
 
 ## Later: remittance versus settlement
 
-Receive an 835 while bank settlement is missing and verify the workflow remains unreconciled. Introduce matching settlement and verify reconciliation. Exercise amount mismatch, partial payment, and duplicate callbacks as separate outcomes.
+Receive an 835 while bank settlement is missing and keep the workflow unreconciled. Add matching settlement and reconcile. Amount mismatch, partial payment, and duplicate callbacks are future separate outcomes.

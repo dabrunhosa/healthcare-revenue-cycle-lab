@@ -6,6 +6,12 @@ services:
         PROJECT: RevenueCycle.Api
     ports:
       - "127.0.0.1:5221:8080"
+    environment:
+      Storage__Directory: /app/data
+      Payer__BaseUrl: http://mock-payer:8080
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://dashboard:18889
+    volumes:
+      - workflow-data:/app/data
   mock-payer:
     build:
       context: .
@@ -13,3 +19,18 @@ services:
         PROJECT: RevenueCycle.MockPayer
     ports:
       - "127.0.0.1:5222:8080"
+    environment:
+      Storage__Directory: /app/data
+      Payer__Mode: Accept
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://dashboard:18889
+    volumes:
+      - payer-data:/app/data
+  dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: 'true'
+    ports:
+      - "127.0.0.1:18888:18888"
+volumes:
+  workflow-data:
+  payer-data:
