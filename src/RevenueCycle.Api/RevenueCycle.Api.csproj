@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../RevenueCycle.Application/RevenueCycle.Application.csproj" />
+    <ProjectReference Include="../RevenueCycle.Infrastructure/RevenueCycle.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RevenueCycle.Domain/RevenueCycle.Domain.csproj" />
+    <Project Path="src/RevenueCycle.Application/RevenueCycle.Application.csproj" />
+    <Project Path="src/RevenueCycle.Infrastructure/RevenueCycle.Infrastructure.csproj" />
+    <Project Path="src/RevenueCycle.Api/RevenueCycle.Api.csproj" />
+    <Project Path="src/RevenueCycle.MockPayer/RevenueCycle.MockPayer.csproj" />
+  </Folder>
+</Solution>

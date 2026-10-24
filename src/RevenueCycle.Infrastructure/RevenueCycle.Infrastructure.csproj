@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../RevenueCycle.Application/RevenueCycle.Application.csproj" />
+  </ItemGroup>
+</Project>

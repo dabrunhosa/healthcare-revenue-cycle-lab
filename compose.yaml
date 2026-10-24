@@ -1,0 +1,15 @@
+services:
+  api:
+    build:
+      context: .
+      args:
+        PROJECT: RevenueCycle.Api
+    ports:
+      - "127.0.0.1:5221:8080"
+  mock-payer:
+    build:
+      context: .
+      args:
+        PROJECT: RevenueCycle.MockPayer
+    ports:
+      - "127.0.0.1:5222:8080"
